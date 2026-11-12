@@ -1,6 +1,5 @@
 import  uuid
 
-from anyio import get_current_task
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -16,7 +15,7 @@ from app.api.deps import get_current_user
 router = APIRouter(prefix="/courses", tags=["Дисциплины"])
 
 # новая дисциплина
-@router.opst("/", response_model=CourseResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=CourseResponse, status_code=status.HTTP_201_CREATED)
 async def create_course(
         course_in: CourseCreate,
         db: AsyncSession = Depends(get_db),
@@ -25,7 +24,7 @@ async def create_course(
     if current_user.role not in (UserRole.TEACHER, UserRole.ADMIN):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="оздавать дисциплины может тольеко преподователь",
+            detail="создавать дисциплины может только преподователь",
         )
 
     course = Course(
@@ -85,10 +84,10 @@ async def assign_group_to_course(
         )
 
     # проверяем, чято курс рдеактирует его автор или админ
-    if course.teacher_id != current_user.id and current_user.role == UserRole.ADMIN:
+    if course.teacher_id != current_user.id and current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="У вас нт прав на управление этой дисциплиной"
+            detail="У вас нет прав на управление этой дисциплиной"
         )
 
     # проверка существования группы
@@ -113,7 +112,7 @@ async def assign_group_to_course(
     return {"message": f"группа {group.name} привязана к дисциплине {course.title}"}
 
 # получаем список групп, привязанных к дисциплине
-@router.get("/{course_id}/groups", response_model=list["StudyGroupResponse"])
+@router.get("/{course_id}/groups", response_model=list[StudyGroupResponse])
 async def get_course_groups(
         course_id: uuid.UUID,
         db: AsyncSession = Depends(get_db),
@@ -131,4 +130,4 @@ async def get_course_groups(
     )
 
     result = await db.execute(query)
-    return result.scalars().all
+    return result.scalars().all()
