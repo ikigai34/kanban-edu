@@ -1,0 +1,26 @@
+from fastapi import FastAPI, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
+
+from app.core.config import settings
+from app.core.database import get_db
+from app.api.v1 import api_router
+
+app = FastAPI(title=settings.PROJECT_NAME)
+
+# подключение api роутеров
+app.include_router(api_router, prefix=settings.API_V1_STR)
+
+
+# проверка работоспособности
+@app.get("/health", tags=["Служебные"])
+async def health_check(
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        result = await db.execute(text("SELECT 1"))
+        scalar = result.scalar()
+        return {"status": "ok", "db_connection": scalar == 1}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+

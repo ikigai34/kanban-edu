@@ -1,0 +1,25 @@
+# Секреты и переменные окружения
+.env
+.env.local
+
+# Python / Backend
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Node / Frontend
+node_modules/
+.next/
+out/
+build/
+*.tsbuildinfo
+
+# IDE и OS
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store
