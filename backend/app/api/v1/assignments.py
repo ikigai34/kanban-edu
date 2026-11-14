@@ -15,7 +15,7 @@ from app.api.deps import get_current_user
 router = APIRouter(prefix="/assignments", tags=["Задания"])
 
 # создать задание в курсе + автораздача карточек студентам привязанных групп
-@router.post("/", status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=AssignmentResponse, status_code=status.HTTP_201_CREATED)
 async def create_assignment(
         assignment_in: AssignmentCreate,
         db: AsyncSession = Depends(get_db),
@@ -86,7 +86,7 @@ async def get_course_assignments(
 ):
     # проверка существования курса
     course_res = await db.execute(select(Course).where(Course.id == course_id))
-    if not course_res.scalars():
+    if not course_res.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="дисциплина не найдена")
 
     query = (

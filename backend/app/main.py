@@ -1,4 +1,7 @@
+import os
+
 from fastapi import FastAPI, Depends, HTTPException
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
@@ -7,6 +10,9 @@ from app.core.database import get_db
 from app.api.v1 import api_router
 
 app = FastAPI(title=settings.PROJECT_NAME)
+
+os.makedirs("uploads", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # подключение api роутеров
 app.include_router(api_router, prefix=settings.API_V1_STR)
