@@ -13,6 +13,10 @@ class AssignmentBase(BaseModel):
         default=None,
         examples=["Описание"]
     )
+    file_url: str | None = Field(
+        default=None,
+        description="путь к прикрепленному файлу к заданию"
+    )
     order: int = Field(default=0, ge=0)
     max_score: float | None = Field(default=100.0, gt=0)
 

@@ -23,3 +23,7 @@ build/
 .vscode/
 Thumbs.db
 .DS_Store
+
+# загруженные файлы
+uploads/
+backend/uploads/

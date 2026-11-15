@@ -1,5 +1,7 @@
+import os
+import shutil
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -12,6 +14,7 @@ from app.models.user import User, UserRole
 from app.schemas.assignment import AssignmentCreate, AssignmentResponse
 from app.api.deps import get_current_user
 
+ALLOWED_EXTENSIONS = {".pdf", ".docx", ".doc", ".zip", ".rar", ".txt", ".png", ".jpg"}
 router = APIRouter(prefix="/assignments", tags=["Задания"])
 
 # создать задание в курсе + автораздача карточек студентам привязанных групп
@@ -45,6 +48,7 @@ async def create_assignment(
         description=assignment_in.description,
         order=assignment_in.order,
         max_score=assignment_in.max_score,
+        file_url=assignment_in.file_url,
     )
     db.add(assignment)
     await db.commit()
@@ -108,4 +112,38 @@ async def get_assignment(
     assignment = result.scalar_one_or_none()
     if not assignment:
         raise HTTPException(status_code=404, detail="задание не найдено")
+    return assignment
+
+# загрузка файла к заданию
+@router.post("/{assignment_id}/upload", response_model=AssignmentResponse)
+async def upload_assignment_file(
+        assignment_id: uuid.UUID,
+        file: UploadFile = File(...),
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+):
+    if current_user.role not in (UserRole.TEACHER, UserRole.ADMIN):
+        raise HTTPException(status_code=403, detail="только преподователь может прикрепить файл к заданию")
+
+    result = await db.execute(select(Assignment).where(Assignment.id == assignment_id))
+    assignment = result.scalar_one_or_none()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="задание не найдено")
+
+    # проверка валидности формата
+    _, ext = os.path.splitext(file.filename or "")
+    if ext.lower() not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="недопустимый формат файла")
+
+    upload_dir = os.path.join("uploads", "assignments")
+    os.makedirs(upload_dir, exist_ok=True)
+    filename= f"manual_{assignment_id}_{uuid.uuid4().hex[:6]}{ext.lower()}"
+    file_path = os.path.join(upload_dir, filename)
+
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    assignment.file_url = f"/uploads/assignments/{filename}"
+    await db.commit()
+    await db.refresh(assignment)
     return assignment
