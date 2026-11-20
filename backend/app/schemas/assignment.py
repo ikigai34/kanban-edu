@@ -18,7 +18,7 @@ class AssignmentBase(BaseModel):
         description="путь к прикрепленному файлу к заданию"
     )
     order: int = Field(default=0, ge=0)
-    max_score: float | None = Field(default=100.0, gt=0)
+    max_score: float | None = Field(default=100.0, ge=0)
 
 # данныен для создания задания преподователем
 class AssignmentCreate(AssignmentBase):

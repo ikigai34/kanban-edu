@@ -8,7 +8,7 @@ from app.core.database import get_db
 from app.models.course import Course, CourseGroup
 from app.models.study_group import StudyGroup, GroupStudent
 from app.models.user import User, UserRole
-from app.schemas.course import CourseCreate, CourseResponse, CourseAssignGroup
+from app.schemas.course import CourseCreate, CourseUpdate, CourseResponse, CourseAssignGroup
 from app.schemas.study_group import StudyGroupResponse
 from app.api.deps import get_current_user
 
@@ -65,6 +65,7 @@ async def get_courses(
 
     result = await db.execute(query)
     return result.scalars().all()
+
 
 #привязать учебную группу
 @router.post("/{course_id}/groups", status_code=status.HTTP_200_OK)
@@ -131,3 +132,50 @@ async def get_course_groups(
 
     result = await db.execute(query)
     return result.scalars().all()
+
+
+# обновление дисциплины
+@router.patch("/{course_id}", response_model=CourseResponse)
+async def update_course(
+    course_id: uuid.UUID,
+    data: CourseUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    course_res = await db.execute(select(Course).where(Course.id == course_id))
+    course = course_res.scalar_one_or_none()
+    if not course:
+        raise HTTPException(status_code=404, detail="Дисциплина не найдена")
+
+    if course.teacher_id != current_user.id and current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="У вас нет прав на редактирование этой дисциплины")
+
+    if data.title is not None:
+        course.title = data.title
+    if data.description is not None:
+        course.description = data.description
+
+    await db.commit()
+    await db.refresh(course)
+    return course
+
+# удаление дисциплины
+@router.delete("/{course_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_course(
+    course_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    course_res = await db.execute(select(Course).where(Course.id == course_id))
+    course = course_res.scalar_one_or_none()
+    if not course:
+        raise HTTPException(status_code=404, detail="Дисциплина не найдена")
+
+    if course.teacher_id != current_user.id and current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="У вас нет прав на удаление этой дисциплины")
+
+    await db.delete(course)
+    await db.commit()
+    return None
+
+

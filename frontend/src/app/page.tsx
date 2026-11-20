@@ -1,36 +1,47 @@
 'use client';
 
-import React, { useEffect, useState, useMemo } from 'react';
-import { User, Course, StudentTask, Assignment } from '@/types';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { User, Course, StudentTask, Assignment, AppNotification, ToastMessage, TaskStatus } from '@/types';
 import {
   getCurrentUser,
+  loginUser,
   getCourses,
   getMyTasksForCourse,
   getCourseTasksForTeacher,
   getCourseAssignments,
+  updateCourse,
+  deleteCourse,
+  getCourseGroups,
+  getGroupStudents,
   removeToken,
-  setToken,
 } from '@/lib/api';
 import {
-  getStoredUser,
-  setStoredUser,
-  getStoredCourses,
-  getStoredTasks,
-  setStoredTasks,
-  updateStoredCourse,
-  deleteStoredCourse,
+  getStoredNotifications,
+  markStoredNotificationsAsRead,
+  markSingleStoredNotificationAsRead,
+  addStoredNotification,
+  saveCoursePrefs,
 } from '@/lib/storage';
-import { DEFAULT_USERS } from '@/lib/mockData';
 import { extractHashtags } from '@/lib/tagUtils';
 import { useCanvas } from '@/hooks/useCanvas';
 import { Header } from '@/components/Header';
 import { Sidebar } from '@/components/Sidebar';
-import { KanbanBoard } from '@/components/KanbanBoard';
+import { KanbanBoard, isTaskInfo } from '@/components/KanbanBoard';
 import { TaskDrawer } from '@/components/TaskDrawer';
 import { AuthModal } from '@/components/AuthModal';
 import { CreateCourseModal } from '@/components/CreateCourseModal';
 import { CreateAssignmentModal } from '@/components/CreateAssignmentModal';
 import { CourseSettingsModal } from '@/components/CourseSettingsModal';
+import { ToastContainer } from '@/components/Toast';
+
+const STATUS_LABELS: Record<TaskStatus, string> = {
+  info: '«Информация»',
+  todo: '«К выполнению»',
+  in_progress: '«В работе»',
+  on_review: '«На проверке»',
+  revision: '«На доработке»',
+  done: '«Сдано / Зачтено»',
+};
 
 export default function Home() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -40,14 +51,17 @@ export default function Home() {
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
 
   const [tasks, setTasks] = useState<StudentTask[]>([]);
-  
+  const [courseStudents, setCourseStudents] = useState<{ id: string; full_name: string; group: string }[]>([]);
+
   // Управление Task Drawer с сохранением состояния для плавной анимации входа и выхода
   const [drawerTask, setDrawerTask] = useState<StudentTask | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
-  // Поиск и фильтрация по тегам
+  // Поиск и фильтрация по тегам, группам и студентам
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
 
   // Сайдбар и модальные окна
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -55,6 +69,110 @@ export default function Home() {
   const [isCreateAssignmentOpen, setIsCreateAssignmentOpen] = useState(false);
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Уведомления и всплывающие тосты
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+  const addToast = (toast: Omit<ToastMessage, 'id'>) => {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const newToast: ToastMessage = { ...toast, id };
+    setToasts((prev) => [...prev, newToast]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  };
+
+  const removeToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  // Загрузка уведомлений при монтировании
+  useEffect(() => {
+    setNotifications(getStoredNotifications());
+  }, []);
+
+  const handleMarkAllAsRead = () => {
+    const updated = markStoredNotificationsAsRead();
+    setNotifications(updated);
+  };
+
+  const handleSelectNotification = (taskId?: string, notifId?: string) => {
+    if (notifId) {
+      const updated = markSingleStoredNotificationAsRead(notifId);
+      setNotifications(updated);
+    }
+    if (taskId) {
+      const targetTask = tasks.find((t) => t.id === taskId);
+      if (targetTask) {
+        if (targetTask.assignment && targetTask.assignment.course_id !== selectedCourseId) {
+          setSelectedCourseId(targetTask.assignment.course_id);
+        }
+        setDrawerTask(targetTask);
+        setIsDrawerOpen(true);
+      }
+    }
+  };
+
+  // Перемещение карточки между колонками -> всплывающее уведомление
+  const handleCardMoved = (
+    task: StudentTask,
+    oldStatus: TaskStatus,
+    newStatus: TaskStatus
+  ) => {
+    const title =
+      task.assignment?.title.replace(/#[a-zA-Zа-яА-ЯёЁ0-9_-]+/g, '').trim() ||
+      'Задание';
+    addToast({
+      title: title,
+      description: `Статус изменен: ${STATUS_LABELS[newStatus]}`,
+      status: newStatus,
+    });
+  };
+
+  // Действие преподавателя (оценка / отправка на доработку) -> уведомление и тост
+  const handleTeacherAction = (data: {
+    taskId: string;
+    taskTitle: string;
+    status: TaskStatus;
+    score?: number | null;
+    teacherComment?: string | null;
+  }) => {
+    addStoredNotification({
+      taskId: data.taskId,
+      courseTitle: selectedCourse?.title,
+      taskTitle: data.taskTitle,
+      status: data.status,
+      statusLabel: STATUS_LABELS[data.status],
+      score: data.score,
+      teacherName: currentUser?.full_name || 'Преподаватель',
+      teacherComment: data.teacherComment,
+    });
+    setNotifications(getStoredNotifications());
+    addToast({
+      title: data.taskTitle,
+      description:
+        data.status === 'done'
+          ? `Зачтено! Оценка: ${data.score !== null ? data.score + ' б.' : 'Зачет'}`
+          : data.status === 'revision'
+          ? 'Работа отправлена на доработку'
+          : `Статус изменен на ${STATUS_LABELS[data.status]}`,
+      status: data.status,
+    });
+  };
+
+  // Сдача работы студентом -> тост
+  const handleStudentSubmitted = (task: StudentTask) => {
+    const title =
+      task.assignment?.title.replace(/#[a-zA-Zа-яА-ЯёЁ0-9_-]+/g, '').trim() ||
+      'Задание';
+    addToast({
+      title: title,
+      description: 'Работа успешно отправлена на проверку преподавателю',
+      status: 'on_review',
+      type: 'success',
+    });
+  };
 
   // Интерактивный 2D Холст (Kaiten Pan & Zoom)
   const {
@@ -78,110 +196,185 @@ export default function Home() {
 
   const isTeacher = currentUser?.role === 'teacher' || currentUser?.role === 'admin';
 
+  const loadCourses = useCallback(async (user?: User | null) => {
+    try {
+      const courseList = await getCourses();
+      setCourses(courseList);
+      if (courseList.length > 0) {
+        setSelectedCourseId((prev) => {
+          if (prev && courseList.some((c) => c.id === prev)) return prev;
+          return courseList[0].id;
+        });
+      } else {
+        setSelectedCourseId(null);
+      }
+    } catch (err) {
+      console.error('Ошибка загрузки дисциплин из БД:', err);
+      setCourses([]);
+      setSelectedCourseId(null);
+    }
+  }, []);
+
+  // Инициализация приложения: авторизация в реальном FastAPI бэкенде
   useEffect(() => {
     const initApp = async () => {
       try {
-        const user = await getCurrentUser();
-        setCurrentUser(user || DEFAULT_USERS.student);
-        await loadCourses(user || DEFAULT_USERS.student);
+        let user = await getCurrentUser();
+        if (!user) {
+          // Если токена нет, входим под студентом по умолчанию из БД
+          try {
+            const loginRes = await loginUser('user@togu.dv', 'password');
+            user = loginRes.user || await getCurrentUser();
+          } catch {
+            setIsAuthModalOpen(true);
+            setLoading(false);
+            return;
+          }
+        }
+        setCurrentUser(user);
+        await loadCourses(user);
       } catch (err) {
-        console.error('Ошибка инициализации:', err);
-        const fallbackUser = getStoredUser();
-        setCurrentUser(fallbackUser);
-        await loadCourses(fallbackUser);
+        console.error('Ошибка инициализации приложения:', err);
+        setIsAuthModalOpen(true);
       } finally {
         setTimeout(() => setLoading(false), 200);
       }
     };
 
     initApp();
+  }, [loadCourses]);
+
+  // Загрузка задач, групп и студентов для выбранного курса
+  const refreshTasks = useCallback(async (courseId: string, user: User | null) => {
+    try {
+      const teacherRole = user?.role === 'teacher' || user?.role === 'admin';
+
+      // 1. Загрузка групп и студентов из БД
+      let students: { id: string; full_name: string; group: string }[] = [];
+      try {
+        const groups = await getCourseGroups(courseId);
+        const groupStudentPromises = groups.map(async (g) => {
+          const list = await getGroupStudents(g.id);
+          return list.map((s) => ({
+            id: s.id,
+            full_name: s.full_name,
+            group: g.name,
+          }));
+        });
+        const nested = await Promise.all(groupStudentPromises);
+        students = nested.flat();
+        setCourseStudents(students);
+      } catch (err) {
+        console.warn('Не удалось загрузить группы курса:', err);
+      }
+
+      // 2. Загрузка задач и заданий курса
+      const [rawTasks, assignments] = await Promise.all([
+        teacherRole
+          ? getCourseTasksForTeacher(courseId)
+          : getMyTasksForCourse(courseId),
+        getCourseAssignments(courseId).catch(() => [] as Assignment[]),
+      ]);
+
+      const assignmentMap = new Map<string, Assignment>();
+      assignments.forEach((a) => assignmentMap.set(a.id, a));
+
+      const studentMap = new Map<string, { id: string; full_name: string; group: string }>();
+      students.forEach((s) => studentMap.set(s.id, s));
+
+      const enrichedTasks = rawTasks.map((t) => ({
+        ...t,
+        assignment: assignmentMap.get(t.assignment_id) || t.assignment,
+        student: studentMap.get(t.student_id) || (user && user.id === t.student_id ? {
+          id: user.id,
+          full_name: user.full_name,
+          group: user.group || 'ПО-41',
+        } : undefined),
+      }));
+
+      setTasks(enrichedTasks);
+
+      // Обновляем открытую карточку без вызова бесконечного цикла
+      setDrawerTask((prev) => {
+        if (!prev) return null;
+        const found = enrichedTasks.find((t) => t.id === prev.id);
+        return found || prev;
+      });
+    } catch (err) {
+      console.error('Ошибка загрузки задач из БД:', err);
+    }
   }, []);
 
-  const loadCourses = async (user?: User | null) => {
-    try {
-      const courseList = await getCourses();
-      setCourses(courseList);
-      if (courseList.length > 0 && !selectedCourseId) {
-        setSelectedCourseId(courseList[0].id);
-      }
-    } catch (err) {
-      console.error('Ошибка загрузки дисциплин:', err);
-      const fallbackCourses = getStoredCourses();
-      setCourses(fallbackCourses);
-      if (fallbackCourses.length > 0 && !selectedCourseId) {
-        setSelectedCourseId(fallbackCourses[0].id);
-      }
-    }
-  };
-
   useEffect(() => {
-    if (!selectedCourseId) return;
+    if (!selectedCourseId || !currentUser) return;
+    refreshTasks(selectedCourseId, currentUser);
+  }, [selectedCourseId, currentUser?.id, currentUser?.role, refreshTasks]);
 
-    const loadTasks = async () => {
-      try {
-        const [rawTasks, assignments] = await Promise.all([
-          isTeacher
-            ? getCourseTasksForTeacher(selectedCourseId)
-            : getMyTasksForCourse(selectedCourseId),
-          getCourseAssignments(selectedCourseId).catch(() => [] as Assignment[]),
-        ]);
-
-        const assignmentMap = new Map<string, Assignment>();
-        assignments.forEach((a) => assignmentMap.set(a.id, a));
-
-        const enrichedTasks = rawTasks.map((t) => ({
-          ...t,
-          assignment: assignmentMap.get(t.assignment_id) || t.assignment,
-        }));
-
-        setTasks(enrichedTasks);
-
-        if (drawerTask) {
-          const updated = enrichedTasks.find((t) => t.id === drawerTask.id);
-          if (updated) setDrawerTask(updated);
-        }
-      } catch (err) {
-        console.error('Ошибка загрузки задач:', err);
-        const allStored = getStoredTasks();
-        const courseTasks = allStored.filter(
-          (t) => t.assignment?.course_id === selectedCourseId
-        );
-        setTasks(courseTasks);
-      }
-    };
-
-    loadTasks();
-  }, [selectedCourseId, currentUser, isTeacher]);
+  const filteredStudents = useMemo(() => {
+    if (!selectedGroup) return courseStudents;
+    return courseStudents.filter((s) => s.group === selectedGroup);
+  }, [courseStudents, selectedGroup]);
 
   const availableTags = useMemo(() => {
     const tagSet = new Set<string>();
     tasks.forEach((t) => {
       if (t.assignment) {
-        (t.assignment.tags || []).forEach((tag) => tagSet.add(tag));
-        extractHashtags(t.assignment.title).forEach((tag) => tagSet.add(tag));
+        (t.assignment.tags || []).forEach((tag) => tagSet.add(tag.toLowerCase()));
+        extractHashtags(t.assignment.title).forEach((tag) => tagSet.add(tag.toLowerCase()));
       }
     });
     return Array.from(tagSet);
   }, [tasks]);
 
   const filteredTasks = useMemo(() => {
+    const seenTodoAssignmentIds = new Set<string>();
+
     return tasks.filter((t) => {
+      // 1. Фильтрация по роли
+      if (!isTeacher) {
+        // Студент видит свои задачи
+        if (currentUser && t.student_id !== currentUser.id) return false;
+      } else {
+        // Преподаватель:
+        // В колонке "todo" и "info" показываем по одной карточке на задание (пул заданий курса)
+        if (t.status === 'todo' || isTaskInfo(t)) {
+          if (seenTodoAssignmentIds.has(t.assignment_id)) {
+            return false;
+          }
+          seenTodoAssignmentIds.add(t.assignment_id);
+        } else {
+          // В колонках проверок ("on_review", "revision", "done"):
+          // Фильтр по студенту
+          if (selectedStudentId && t.student_id !== selectedStudentId) {
+            return false;
+          }
+          // Фильтр по группе
+          if (selectedGroup && t.student?.group && t.student.group !== selectedGroup) {
+            return false;
+          }
+        }
+      }
+
       const assignment = t.assignment;
       if (!assignment) return true;
 
+      // 2. Быстрый поиск
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase().trim();
         const titleMatch = assignment.title.toLowerCase().includes(query);
         const descMatch = (assignment.description || '').toLowerCase().includes(query);
+        const studentMatch = (t.student?.full_name || '').toLowerCase().includes(query);
+        const groupMatch = (t.student?.group || '').toLowerCase().includes(query);
         const tagMatch = (assignment.tags || []).some((tg) =>
           tg.toLowerCase().includes(query)
         );
-        if (!titleMatch && !descMatch && !tagMatch) return false;
+        if (!titleMatch && !descMatch && !tagMatch && !studentMatch && !groupMatch) return false;
       }
 
+      // 3. Фильтр по тегам
       if (selectedTag) {
         const allCardTags = [
-          ...(assignment.tags || []),
+          ...(assignment.tags || []).map((tg) => tg.toLowerCase()),
           ...extractHashtags(assignment.title),
         ];
         const hasTag = allCardTags.some(
@@ -192,7 +385,7 @@ export default function Home() {
 
       return true;
     });
-  }, [tasks, searchQuery, selectedTag]);
+  }, [tasks, searchQuery, selectedTag, isTeacher, currentUser, selectedGroup, selectedStudentId]);
 
   // Плавное открытие карточки
   const handleCardClick = (task: StudentTask) => {
@@ -211,59 +404,103 @@ export default function Home() {
   const handleLogout = () => {
     removeToken();
     setCurrentUser(null);
+    setTasks([]);
+    setCourses([]);
     setIsAuthModalOpen(true);
   };
 
   const handleAuthSuccess = async (user: User) => {
     setCurrentUser(user);
-    setStoredUser(user);
     setIsAuthModalOpen(false);
     await loadCourses(user);
   };
 
-  const handleSwitchRole = (newRole: 'student' | 'teacher') => {
-    const updatedUser = newRole === 'teacher' ? DEFAULT_USERS.teacher : DEFAULT_USERS.student;
-    setCurrentUser(updatedUser);
-    setStoredUser(updatedUser);
-    setToken(newRole === 'teacher' ? 'demo-teacher-token' : 'demo-student-token');
+  const handleSwitchRole = async (newRole: 'student' | 'teacher') => {
+    try {
+      setLoading(true);
+      handleCloseDrawer();
+      if (newRole === 'teacher') {
+        await loginUser('teacher@mail.com', 'password');
+      } else {
+        await loginUser('user@togu.dv', 'password');
+      }
+      const user = await getCurrentUser();
+      setCurrentUser(user);
+      setSelectedGroup(null);
+      setSelectedStudentId(null);
+      await loadCourses(user);
+    } catch (err) {
+      console.error('Ошибка смены роли:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleTaskUpdated = (updatedTask: StudentTask) => {
-    const updatedList = tasks.map((t) =>
-      t.id === updatedTask.id ? updatedTask : t
-    );
-    setTasks(updatedList);
-    setStoredTasks(
-      getStoredTasks().map((t) => (t.id === updatedTask.id ? updatedTask : t))
+    setTasks((prev) =>
+      prev.map((t) => (t.id === updatedTask.id ? updatedTask : t))
     );
     setDrawerTask(updatedTask);
-    setCourses(getStoredCourses());
   };
 
   const handleTasksChange = (updatedTasks: StudentTask[]) => {
-    setTasks(updatedTasks);
-    const allTasks = getStoredTasks();
-    const taskMap = new Map(updatedTasks.map((t) => [t.id, t]));
-    const merged = allTasks.map((t) => (taskMap.has(t.id) ? taskMap.get(t.id)! : t));
-    setStoredTasks(merged);
-    setCourses(getStoredCourses());
+    setTasks((prev) => {
+      const updatedMap = new Map(updatedTasks.map((t) => [t.id, t]));
+      return prev.map((t) => updatedMap.get(t.id) || t);
+    });
   };
 
-  const handleSaveCourseSettings = (updatedCourse: Course) => {
+  const handleSaveCourseSettings = async (updatedCourse: Course) => {
     if (!isTeacher) return;
-    updateStoredCourse(updatedCourse.id, updatedCourse);
-    setCourses(getStoredCourses());
+    try {
+      saveCoursePrefs(updatedCourse.id, {
+        color: updatedCourse.color,
+        code: updatedCourse.code,
+      });
+
+      // Мгновенное обновление стейта в интерфейсе
+      setCourses((prev) =>
+        prev.map((c) =>
+          c.id === updatedCourse.id
+            ? {
+                ...c,
+                title: updatedCourse.title,
+                description: updatedCourse.description,
+                color: updatedCourse.color,
+                code: updatedCourse.code,
+              }
+            : c
+        )
+      );
+
+      await updateCourse(updatedCourse.id, {
+        title: updatedCourse.title,
+        description: updatedCourse.description || undefined,
+        color: updatedCourse.color,
+        code: updatedCourse.code,
+      });
+      await loadCourses(currentUser);
+      setEditingCourse(null);
+    } catch (err) {
+      console.error('Ошибка сохранения настроек дисциплины:', err);
+    }
   };
 
-  const handleDeleteCourse = (courseId: string) => {
+  const handleDeleteCourse = async (courseId: string) => {
     if (!isTeacher) {
       alert('Удаление дисциплин разрешено только преподавателям.');
       return;
     }
-    const remaining = deleteStoredCourse(courseId);
-    setCourses(remaining);
-    if (selectedCourseId === courseId) {
-      setSelectedCourseId(remaining.length > 0 ? remaining[0].id : null);
+    try {
+      await deleteCourse(courseId);
+      const remaining = await getCourses();
+      setCourses(remaining);
+      if (selectedCourseId === courseId) {
+        setSelectedCourseId(remaining.length > 0 ? remaining[0].id : null);
+      }
+      setEditingCourse(null);
+    } catch (err) {
+      console.error('Ошибка удаления дисциплины:', err);
     }
   };
 
@@ -305,7 +542,18 @@ export default function Home() {
         onResetZoom={resetView}
         onLogout={handleLogout}
         onSwitchRole={handleSwitchRole}
-        onOpenCourseSettings={isTeacher ? () => setEditingCourse(selectedCourse) : undefined}
+        onOpenCourseSettings={() => setEditingCourse(selectedCourse)}
+        notifications={notifications}
+        onMarkAllAsRead={handleMarkAllAsRead}
+        onSelectNotification={handleSelectNotification}
+        selectedGroup={selectedGroup}
+        onSelectGroup={(g) => {
+          setSelectedGroup(g);
+          setSelectedStudentId(null);
+        }}
+        selectedStudentId={selectedStudentId}
+        onSelectStudent={setSelectedStudentId}
+        students={filteredStudents}
       />
 
       {/* 2. Основное рабочее пространство */}
@@ -323,7 +571,7 @@ export default function Home() {
           onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
           user={currentUser}
           onOpenCreateCourse={() => setIsCreateCourseOpen(true)}
-          onOpenCourseSettings={isTeacher ? (course) => setEditingCourse(course) : undefined}
+          onOpenCourseSettings={(course) => setEditingCourse(course)}
         />
 
         {/* Центральная зона: 2D Холст Канбана */}
@@ -345,6 +593,7 @@ export default function Home() {
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
+            onCardMoved={handleCardMoved}
           />
 
           {/* 
@@ -358,6 +607,8 @@ export default function Home() {
             currentUser={currentUser}
             onClose={handleCloseDrawer}
             onTaskUpdated={handleTaskUpdated}
+            onTeacherAction={handleTeacherAction}
+            onStudentSubmitted={handleStudentSubmitted}
           />
         </main>
       </div>
@@ -379,8 +630,9 @@ export default function Home() {
       <CreateCourseModal
         isOpen={isCreateCourseOpen}
         onClose={() => setIsCreateCourseOpen(false)}
-        onCourseCreated={(newCourse) => {
-          setCourses(getStoredCourses());
+        onCourseCreated={async (newCourse) => {
+          const list = await getCourses();
+          setCourses(list);
           setSelectedCourseId(newCourse.id);
         }}
       />
@@ -391,16 +643,16 @@ export default function Home() {
           isOpen={isCreateAssignmentOpen}
           courseId={selectedCourseId}
           onClose={() => setIsCreateAssignmentOpen(false)}
-          onAssignmentCreated={() => {
-            const allStored = getStoredTasks();
-            const courseTasks = allStored.filter(
-              (t) => t.assignment?.course_id === selectedCourseId
-            );
-            setTasks(courseTasks);
-            setCourses(getStoredCourses());
+          onAssignmentCreated={async () => {
+            if (selectedCourseId && currentUser) {
+              await refreshTasks(selectedCourseId, currentUser);
+            }
           }}
         />
       )}
+
+      {/* Всплывающие системные уведомления (Toasts) */}
+      <ToastContainer toasts={toasts} onDismiss={removeToast} />
     </div>
   );
 }

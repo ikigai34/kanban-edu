@@ -20,7 +20,7 @@ export interface AttachmentFile {
 
 export type TaskPriority = 'urgent' | 'normal' | 'info';
 
-export type TaskStatus = 'todo' | 'in_progress' | 'on_review' | 'revision' | 'done';
+export type TaskStatus = 'info' | 'todo' | 'in_progress' | 'on_review' | 'revision' | 'done';
 
 export interface Course {
   id: string;
@@ -74,6 +74,12 @@ export interface StudentTask {
   created_at: string;
   updated_at: string;
   assignment?: Assignment;
+  student?: {
+    id: string;
+    full_name: string;
+    group: string;
+    avatar?: string;
+  };
 }
 
 export interface ColumnDefinition {
@@ -91,4 +97,26 @@ export interface CanvasTransform {
   x: number;
   y: number;
   scale: number;
+}
+
+export interface AppNotification {
+  id: string;
+  taskId?: string;
+  courseTitle?: string;
+  taskTitle: string;
+  status: TaskStatus;
+  statusLabel?: string;
+  score?: number | null;
+  teacherName?: string;
+  teacherComment?: string | null;
+  createdAt: string;
+  isRead: boolean;
+}
+
+export interface ToastMessage {
+  id: string;
+  title: string;
+  description?: string;
+  type?: 'info' | 'success' | 'warning' | 'error';
+  status?: TaskStatus;
 }

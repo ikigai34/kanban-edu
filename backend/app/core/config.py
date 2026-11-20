@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str = "postgres"
     POSTGRES_DB: str = "kanban_edu"
     POSTGRES_HOST: str = "localhost"
-    POSTGRES_PORT: int = Field(default=5432, ge=1, le=65535)
+    POSTGRES_PORT: int = Field(default=5433, ge=1, le=65535)
 
     # jwt авторизация
     SECRET_KEY: str = "change_this_to_super_secret_key_in_production_kanban_edu_2026"
@@ -26,7 +26,7 @@ class Settings(BaseSettings):
         )
 
     model_config = SettingsConfigDict(
-        env_file="../.env",
+        env_file=(".env", "../.env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )

@@ -18,6 +18,10 @@ class CourseBase(BaseModel):
 class CourseCreate(CourseBase):
     pass
 
+class CourseUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=2, max_length=255)
+    description: str | None = None
+
 # схема ответа апи
 class CourseResponse(CourseBase):
     id: uuid.UUID

@@ -77,9 +77,9 @@ async def move_task(
     if not task:
         raise HTTPException(status_code=404, detail="задача не найдена")
 
-    # перемещать карточку может только ее владелец (студент) или админ
-    if task.student_id != current_user.id and current_user.role != UserRole.ADMIN:
-        raise HTTPException(status_code=403, detail="нельзя перемещать чужу. задачу")
+    # перемещать карточку может владелец (студент), преподаватель или админ
+    if task.student_id != current_user.id and current_user.role not in (UserRole.ADMIN, UserRole.TEACHER):
+        raise HTTPException(status_code=403, detail="нельзя перемещать чужую задачу")
 
     # обновление статуса и позиции
     task.status = move_data.status
