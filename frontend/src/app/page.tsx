@@ -24,6 +24,7 @@ import {
 } from '@/lib/storage';
 import { extractHashtags } from '@/lib/tagUtils';
 import { useCanvas } from '@/hooks/useCanvas';
+import { useTheme } from '@/hooks/useTheme';
 import { Header } from '@/components/Header';
 import { Sidebar } from '@/components/Sidebar';
 import { KanbanBoard, isTaskInfo } from '@/components/KanbanBoard';
@@ -44,6 +45,7 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
 };
 
 export default function Home() {
+  const { isDark, toggleTheme } = useTheme();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
@@ -282,15 +284,35 @@ export default function Home() {
       const studentMap = new Map<string, { id: string; full_name: string; group: string }>();
       students.forEach((s) => studentMap.set(s.id, s));
 
-      const enrichedTasks = rawTasks.map((t) => ({
-        ...t,
-        assignment: assignmentMap.get(t.assignment_id) || t.assignment,
-        student: studentMap.get(t.student_id) || (user && user.id === t.student_id ? {
-          id: user.id,
-          full_name: user.full_name,
-          group: user.group || 'ПО-41',
-        } : undefined),
-      }));
+      let bookmarkedIds: string[] = [];
+      try {
+        bookmarkedIds = JSON.parse(localStorage.getItem('kanban_bookmarked_ids') || '[]');
+      } catch {}
+
+      const enrichedTasks = rawTasks.map((t) => {
+        const asgn = assignmentMap.get(t.assignment_id) || t.assignment;
+        const isBookmarked = bookmarkedIds.includes(t.assignment_id) || bookmarkedIds.includes(t.id);
+        let finalAsgn = asgn;
+        if (asgn && isBookmarked) {
+          const currentTags = asgn.tags || [];
+          if (!currentTags.some((tag) => tag.toLowerCase() === '#закладки')) {
+            finalAsgn = {
+              ...asgn,
+              tags: [...currentTags, '#закладки'],
+            };
+          }
+        }
+
+        return {
+          ...t,
+          assignment: finalAsgn,
+          student: studentMap.get(t.student_id) || (user && user.id === t.student_id ? {
+            id: user.id,
+            full_name: user.full_name,
+            group: user.group || 'ПО-41',
+          } : undefined),
+        };
+      });
 
       setTasks(enrichedTasks);
 
@@ -504,19 +526,75 @@ export default function Home() {
     }
   };
 
+  const handleToggleBookmark = useCallback((task: StudentTask) => {
+    const taskId = task.id;
+    const assignmentId = task.assignment_id;
+
+    setTasks((prev) =>
+      prev.map((t) => {
+        const isTarget = t.id === taskId || (assignmentId && t.assignment_id === assignmentId);
+        if (!isTarget) return t;
+
+        const currentTags = t.assignment?.tags || [];
+        const rawTags = [
+          ...currentTags,
+          ...extractHashtags(t.assignment?.title || ''),
+          ...extractHashtags(t.assignment?.description || ''),
+        ].map((tag) => tag.toLowerCase());
+
+        const isCurrentlyBookmarked = rawTags.includes('#закладки');
+
+        let newTags: string[];
+        let newTitle = t.assignment?.title || '';
+
+        if (isCurrentlyBookmarked) {
+          newTags = currentTags.filter((tag) => tag.toLowerCase() !== '#закладки');
+          newTitle = newTitle.replace(/#закладки\b/gi, '').trim();
+        } else {
+          newTags = [...currentTags.filter((tag) => tag.toLowerCase() !== '#закладки'), '#закладки'];
+        }
+
+        return {
+          ...t,
+          assignment: t.assignment
+            ? {
+                ...t.assignment,
+                tags: newTags,
+                title: newTitle,
+              }
+            : undefined,
+        };
+      })
+    );
+
+    try {
+      const stored: string[] = JSON.parse(localStorage.getItem('kanban_bookmarked_ids') || '[]');
+      const idToStore = assignmentId || taskId;
+      const index = stored.indexOf(idToStore);
+      if (index !== -1) {
+        stored.splice(index, 1);
+      } else {
+        stored.push(idToStore);
+      }
+      localStorage.setItem('kanban_bookmarked_ids', JSON.stringify(stored));
+    } catch (e) {
+      console.warn('Не удалось сохранить закладку:', e);
+    }
+  }, []);
+
   const selectedCourse = courses.find((c) => c.id === selectedCourseId) || courses[0];
 
   if (loading) {
     return (
-      <div className="min-h-screen flex flex-col bg-slate-100 font-sans antialiased text-slate-800">
-        <div className="h-16 bg-white border-b border-slate-200 animate-pulse px-6" />
+      <div className="min-h-screen flex flex-col bg-slate-100 dark:bg-[#181818] font-sans antialiased text-slate-800 dark:text-neutral-100">
+        <div className="h-16 bg-white dark:bg-[#181818] border-b border-slate-200 dark:border-[#2a2a2a] animate-pulse px-6" />
         <div className="flex-1 w-full max-w-[1920px] mx-auto p-5 flex gap-5 h-[calc(100vh-64px)]">
-          <div className="w-76 bg-white rounded-2xl border border-slate-200 animate-pulse" />
-          <div className="flex-1 flex gap-5 bg-slate-50 rounded-2xl border border-slate-200 p-6">
+          <div className="w-76 bg-white dark:bg-[#161616] rounded-2xl border border-slate-200 dark:border-[#2a2a2a] animate-pulse" />
+          <div className="flex-1 flex gap-5 bg-slate-50 dark:bg-[#1e1e1e] rounded-2xl border border-slate-200 dark:border-[#2a2a2a] p-6">
             {[1, 2, 3, 4, 5].map((i) => (
               <div
                 key={i}
-                className="w-[330px] bg-slate-200/60 rounded-2xl animate-pulse shrink-0 h-full"
+                className="w-[330px] bg-slate-200/60 dark:bg-[#252525] rounded-2xl animate-pulse shrink-0 h-full"
               />
             ))}
           </div>
@@ -526,7 +604,7 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-100/70 font-sans antialiased text-slate-800 select-none overflow-hidden">
+    <div className="min-h-screen flex flex-col bg-slate-100/70 dark:bg-[#181818] font-sans antialiased text-slate-800 dark:text-neutral-100 select-none overflow-hidden">
       {/* 1. Верхняя панель (Header) */}
       <Header
         user={currentUser}
@@ -554,6 +632,8 @@ export default function Home() {
         selectedStudentId={selectedStudentId}
         onSelectStudent={setSelectedStudentId}
         students={filteredStudents}
+        isDark={isDark}
+        onToggleTheme={toggleTheme}
       />
 
       {/* 2. Основное рабочее пространство */}
@@ -581,6 +661,7 @@ export default function Home() {
             onTasksChange={handleTasksChange}
             onCardClick={handleCardClick}
             onTagClick={(tag) => setSelectedTag(tag === selectedTag ? null : tag)}
+            onToggleBookmark={handleToggleBookmark}
             currentUser={currentUser}
             courseTitle={selectedCourse?.title || ''}
             onOpenCreateAssignment={() => setIsCreateAssignmentOpen(true)}

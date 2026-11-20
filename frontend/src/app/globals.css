@@ -1,8 +1,18 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #f8fafc;
   --foreground: #0f172a;
+  --canvas-dots: #cbd5e1;
+}
+
+.dark {
+  --background: #181818;
+  --foreground: #ededed;
+  --canvas-bg: #1e1e1e;
+  --canvas-dots: #282828;
 }
 
 body {
@@ -33,6 +43,14 @@ body {
   background: rgba(100, 116, 139, 0.7);
 }
 
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
 /* Анимация пульсации для срочных карточек */
 @keyframes urgent-pulse {
   0%, 100% {
@@ -47,4 +65,31 @@ body {
 
 .animate-urgent-pulse {
   animation: urgent-pulse 1.8s infinite ease-in-out;
+}
+
+/* Плавное переключение темы через View Transitions API и CSS Fallback */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 350ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 0.01ms !important;
+  }
+}
+
+html.theme-transition,
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+  transition: background-color 350ms cubic-bezier(0.2, 0, 0, 1),
+              border-color 350ms cubic-bezier(0.2, 0, 0, 1),
+              color 350ms cubic-bezier(0.2, 0, 0, 1),
+              fill 350ms cubic-bezier(0.2, 0, 0, 1),
+              stroke 350ms cubic-bezier(0.2, 0, 0, 1),
+              box-shadow 350ms cubic-bezier(0.2, 0, 0, 1) !important;
+  transition-delay: 0s !important;
 }
