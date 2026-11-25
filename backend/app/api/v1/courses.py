@@ -2,12 +2,14 @@ import  uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 
 from app.core.database import get_db
+from app.models import CourseColumn
 from app.models.course import Course, CourseGroup
 from app.models.study_group import StudyGroup, GroupStudent
 from app.models.user import User, UserRole
+from app.models.student_task import StudentTask
 from app.schemas.course import CourseCreate, CourseUpdate, CourseResponse, CourseAssignGroup
 from app.schemas.study_group import StudyGroupResponse
 from app.api.deps import get_current_user
@@ -178,4 +180,31 @@ async def delete_course(
     await db.commit()
     return None
 
+# удаление столбца
+@router.delete("/{course_id}/columns/{column_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_course_column(
+        course_id: uuid.UUID,
+        column_id: uuid.UUID,
+        delete_tasks: bool = False, # статус удалять ли картчоки в колонке
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+):
+    course = await db.get(Course, course_id)
+    if not course:
+        raise HTTPException(status_code=404)
 
+    if current_user.role != UserRole.ADMIN and course.teacher_id != current_user.id:
+        raise HTTPException(status_code=403)
+
+    column = await db.get(CourseColumn, column_id)
+    if not column or column.course_id != course_id:
+        raise HTTPException(status_code=403)
+
+    if delete_tasks:
+        await db.execute(
+            delete(StudentTask).where(StudentTask.column_id == column_id)
+        )
+
+    await db.delete(column)
+    await db.commit()
+    return None

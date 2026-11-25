@@ -82,5 +82,11 @@ class StudentTask(Base):
         nullable=False,
     )
 
+    column_id: Mapped[uuid.UUID | None]  =mapped_column(
+        ForeignKey("course_columns.id", ondelete="SET NULL"),
+        nullable=False,
+        index=True,
+    )
+
     def __repr__(self) -> str:
         return f"<StudentTask {self.id} ({self.status})>"
