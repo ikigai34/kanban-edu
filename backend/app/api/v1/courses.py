@@ -225,4 +225,5 @@ async def delete_course_column(
                 os.remove(file_path)
         except OSError:
             pass
+
     return None
