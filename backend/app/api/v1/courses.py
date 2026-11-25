@@ -1,3 +1,4 @@
+import os
 import  uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -200,11 +201,28 @@ async def delete_course_column(
     if not column or column.course_id != course_id:
         raise HTTPException(status_code=403)
 
+    files_to_delete: list[str] = []
+
     if delete_tasks:
+        files_res = await db.execute(
+            select(StudentTask.file_url).where(
+                StudentTask.column_id == column_id,
+                StudentTask.file_url.is_not(None),
+            )
+        )
+        files_to_delete = [url for url in files_res.scalars().all() if url.startswith("/uploads")]
         await db.execute(
             delete(StudentTask).where(StudentTask.column_id == column_id)
         )
 
     await db.delete(column)
     await db.commit()
+
+    for file_url in files_to_delete:
+        file_path = file_url.lstrip("/")
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except OSError:
+            pass
     return None
