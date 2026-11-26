@@ -84,7 +84,7 @@ class StudentTask(Base):
 
     column_id: Mapped[uuid.UUID | None]  =mapped_column(
         ForeignKey("course_columns.id", ondelete="SET NULL"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
 

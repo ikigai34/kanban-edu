@@ -199,7 +199,7 @@ async def delete_course_column(
 
     column = await db.get(CourseColumn, column_id)
     if not column or column.course_id != course_id:
-        raise HTTPException(status_code=403)
+        raise HTTPException(status_code=404, detail="Столбец не найден")
 
     files_to_delete: list[str] = []
 
@@ -227,3 +227,5 @@ async def delete_course_column(
             pass
 
     return None
+
+@router.get("/{course_id}/columns")

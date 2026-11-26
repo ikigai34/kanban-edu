@@ -8,6 +8,11 @@ from app.schemas.student_task import (
     StudentTaskSubmit,
     StudentTaskGrade,
 )
+from app.schemas.course_column import (
+    CourseColumnCreate,
+    CourseColumnResponse,
+    CourseColumnUpdate,
+)
 
 __all__ = [
     "UserCreate", "UserResponse", "Token", "TokenPayload",
@@ -15,4 +20,5 @@ __all__ = [
     "CourseCreate", "CourseResponse", "CourseAssignGroup",
     "AssignmentCreate", "AssignmentResponse",
     "StudentTaskResponse", "StudentTaskMove", "StudentTaskSubmit", "StudentTaskGrade",
+    "CourseColumnCreate", "CourseColumnUpdate", "CourseColumnResponse",
 ]

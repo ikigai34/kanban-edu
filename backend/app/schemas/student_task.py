@@ -8,6 +8,7 @@ class StudentTaskResponse(BaseModel):
     id: uuid.UUID
     student_id: uuid.UUID
     assignment_id: uuid.UUID
+    column_id: uuid.UUID | None = None
     status: TaskStatus
     position: float
     comment: str | None = None
@@ -22,6 +23,7 @@ class StudentTaskResponse(BaseModel):
 # drag and drop
 class StudentTaskMove(BaseModel):
     status: TaskStatus
+    column_id: uuid.UUID | None = None
     position: float = Field(ge=0.0, description="дробный индекс для сортировки в колонке")
 
 # схема сдачи работы
