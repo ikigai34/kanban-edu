@@ -1,4 +1,97 @@
-import { Course, StudentTask, User, ColumnDefinition } from '@/types';
+import { Course, CourseColumn, StudentTask, User, ColumnDefinition } from '@/types';
+
+export const COLUMN_COLOR_THEMES: Record<
+  string,
+  {
+    label: string;
+    swatch: string;
+    headerBg: string;
+    headerText: string;
+    badgeBg: string;
+    badgeText: string;
+    dotColor: string;
+  }
+> = {
+  indigo: {
+    label: 'Индиго',
+    swatch: 'bg-indigo-500',
+    headerBg: 'bg-indigo-100/90 dark:bg-indigo-500/[0.07]',
+    headerText: 'text-indigo-950 dark:text-neutral-200 font-semibold',
+    badgeBg: 'bg-indigo-200/75 dark:bg-white/[0.06] text-indigo-900 dark:text-neutral-400 font-semibold',
+    badgeText: 'text-indigo-900 dark:text-neutral-400',
+    dotColor: 'bg-indigo-500 dark:bg-indigo-400/75',
+  },
+  sky: {
+    label: 'Голубой',
+    swatch: 'bg-sky-500',
+    headerBg: 'bg-sky-100/90 dark:bg-sky-500/[0.07]',
+    headerText: 'text-sky-950 dark:text-neutral-200 font-semibold',
+    badgeBg: 'bg-sky-200/75 dark:bg-white/[0.06] text-sky-900 dark:text-neutral-400 font-semibold',
+    badgeText: 'text-sky-900 dark:text-neutral-400',
+    dotColor: 'bg-sky-500 dark:bg-sky-400/75',
+  },
+  emerald: {
+    label: 'Изумрудный',
+    swatch: 'bg-emerald-500',
+    headerBg: 'bg-emerald-100/90 dark:bg-emerald-500/[0.07]',
+    headerText: 'text-emerald-950 dark:text-neutral-200 font-semibold',
+    badgeBg: 'bg-emerald-200/75 dark:bg-white/[0.06] text-emerald-900 dark:text-neutral-400 font-semibold',
+    badgeText: 'text-emerald-900 dark:text-neutral-400',
+    dotColor: 'bg-emerald-500 dark:bg-emerald-400/75',
+  },
+  amber: {
+    label: 'Янтарный',
+    swatch: 'bg-amber-500',
+    headerBg: 'bg-amber-100/90 dark:bg-amber-500/[0.07]',
+    headerText: 'text-amber-950 dark:text-neutral-200 font-semibold',
+    badgeBg: 'bg-amber-200/75 dark:bg-white/[0.06] text-amber-900 dark:text-neutral-400 font-semibold',
+    badgeText: 'text-amber-900 dark:text-neutral-400',
+    dotColor: 'bg-amber-500 dark:bg-amber-400/75',
+  },
+  rose: {
+    label: 'Розовый',
+    swatch: 'bg-rose-500',
+    headerBg: 'bg-rose-100/90 dark:bg-rose-500/[0.07]',
+    headerText: 'text-rose-950 dark:text-neutral-200 font-semibold',
+    badgeBg: 'bg-rose-200/75 dark:bg-white/[0.06] text-rose-900 dark:text-neutral-400 font-semibold',
+    badgeText: 'text-rose-900 dark:text-neutral-400',
+    dotColor: 'bg-rose-500 dark:bg-rose-400/75',
+  },
+  purple: {
+    label: 'Фиолетовый',
+    swatch: 'bg-purple-500',
+    headerBg: 'bg-purple-100/90 dark:bg-purple-500/[0.07]',
+    headerText: 'text-purple-950 dark:text-neutral-200 font-semibold',
+    badgeBg: 'bg-purple-200/75 dark:bg-white/[0.06] text-purple-900 dark:text-neutral-400 font-semibold',
+    badgeText: 'text-purple-900 dark:text-neutral-400',
+    dotColor: 'bg-purple-500 dark:bg-purple-400/75',
+  },
+  slate: {
+    label: 'Серый',
+    swatch: 'bg-slate-500',
+    headerBg: 'bg-slate-200/75 dark:bg-white/[0.03]',
+    headerText: 'text-slate-800 dark:text-neutral-200 font-semibold',
+    badgeBg: 'bg-slate-300/70 dark:bg-white/[0.06] text-slate-800 dark:text-neutral-400 font-semibold',
+    badgeText: 'text-slate-800 dark:text-neutral-400',
+    dotColor: 'bg-slate-500 dark:bg-neutral-500',
+  },
+};
+
+export function buildCustomColumnDefinition(col: CourseColumn): ColumnDefinition {
+  const theme = COLUMN_COLOR_THEMES[col.color || 'indigo'] || COLUMN_COLOR_THEMES.indigo;
+  return {
+    id: col.id,
+    title: col.title,
+    accentColor: '',
+    headerBg: theme.headerBg,
+    headerText: theme.headerText,
+    badgeBg: theme.badgeBg,
+    badgeText: theme.badgeText,
+    dotColor: theme.dotColor,
+    isCustom: true,
+    courseColumn: col,
+  };
+}
 
 export const DEFAULT_USERS: { student: User; teacher: User } = {
   student: {

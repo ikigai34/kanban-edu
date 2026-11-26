@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { User, Course, StudentTask, Assignment, AppNotification, ToastMessage, TaskStatus } from '@/types';
+import { User, Course, CourseColumn, StudentTask, Assignment, AppNotification, ToastMessage, TaskStatus } from '@/types';
 import {
   getCurrentUser,
   loginUser,
@@ -9,6 +9,10 @@ import {
   getMyTasksForCourse,
   getCourseTasksForTeacher,
   getCourseAssignments,
+  getCourseColumns,
+  createCourseColumn,
+  updateCourseColumn,
+  deleteCourseColumn,
   updateCourse,
   deleteCourse,
   getCourseGroups,
@@ -33,6 +37,7 @@ import { AuthModal } from '@/components/AuthModal';
 import { CreateCourseModal } from '@/components/CreateCourseModal';
 import { CreateAssignmentModal } from '@/components/CreateAssignmentModal';
 import { CourseSettingsModal } from '@/components/CourseSettingsModal';
+import { ColumnFormModal, DeleteColumnModal } from '@/components/ColumnModal';
 import { ToastContainer } from '@/components/Toast';
 
 const STATUS_LABELS: Record<TaskStatus, string> = {
@@ -53,6 +58,7 @@ export default function Home() {
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
 
   const [tasks, setTasks] = useState<StudentTask[]>([]);
+  const [customColumns, setCustomColumns] = useState<CourseColumn[]>([]);
   const [courseStudents, setCourseStudents] = useState<{ id: string; full_name: string; group: string }[]>([]);
 
   // Управление Task Drawer с сохранением состояния для плавной анимации входа и выхода
@@ -70,6 +76,9 @@ export default function Home() {
   const [isCreateCourseOpen, setIsCreateCourseOpen] = useState(false);
   const [isCreateAssignmentOpen, setIsCreateAssignmentOpen] = useState(false);
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
+  const [isColumnFormOpen, setIsColumnFormOpen] = useState(false);
+  const [editingColumn, setEditingColumn] = useState<CourseColumn | null>(null);
+  const [deletingColumnInfo, setDeletingColumnInfo] = useState<{ column: CourseColumn; taskCount: number } | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Уведомления и всплывающие тосты
@@ -119,16 +128,20 @@ export default function Home() {
   // Перемещение карточки между колонками -> всплывающее уведомление
   const handleCardMoved = (
     task: StudentTask,
-    oldStatus: TaskStatus,
-    newStatus: TaskStatus
+    oldContainer: string,
+    newContainer: string
   ) => {
     const title =
       task.assignment?.title.replace(/#[a-zA-Zа-яА-ЯёЁ0-9_-]+/g, '').trim() ||
       'Задание';
+    const customCol = customColumns.find((c) => c.id === newContainer);
+    const label = customCol
+      ? `«${customCol.title}»`
+      : STATUS_LABELS[newContainer as TaskStatus] || newContainer;
     addToast({
       title: title,
-      description: `Статус изменен: ${STATUS_LABELS[newStatus]}`,
-      status: newStatus,
+      description: `Перемещено в: ${label}`,
+      status: customCol ? undefined : (newContainer as TaskStatus),
     });
   };
 
@@ -270,13 +283,15 @@ export default function Home() {
         console.warn('Не удалось загрузить группы курса:', err);
       }
 
-      // 2. Загрузка задач и заданий курса
-      const [rawTasks, assignments] = await Promise.all([
+      // 2. Загрузка задач, заданий и кастомных столбцов курса
+      const [rawTasks, assignments, columns] = await Promise.all([
         teacherRole
           ? getCourseTasksForTeacher(courseId)
           : getMyTasksForCourse(courseId),
         getCourseAssignments(courseId).catch(() => [] as Assignment[]),
+        getCourseColumns(courseId).catch(() => [] as CourseColumn[]),
       ]);
+      setCustomColumns(columns);
 
       const assignmentMap = new Map<string, Assignment>();
       assignments.forEach((a) => assignmentMap.set(a.id, a));
@@ -526,6 +541,75 @@ export default function Home() {
     }
   };
 
+  // Создание / редактирование кастомного столбца дисциплины
+  const handleSaveColumn = async (data: { title: string; color: string }) => {
+    if (!selectedCourseId || !isTeacher) return;
+    try {
+      if (editingColumn) {
+        const updated = await updateCourseColumn(selectedCourseId, editingColumn.id, {
+          title: data.title,
+          color: data.color,
+        });
+        setCustomColumns((prev) =>
+          prev.map((c) => (c.id === updated.id ? updated : c))
+        );
+        addToast({
+          title: updated.title,
+          description: 'Столбец обновлён',
+          type: 'success',
+        });
+      } else {
+        const created = await createCourseColumn(selectedCourseId, {
+          title: data.title,
+          color: data.color,
+        });
+        setCustomColumns((prev) => [...prev, created]);
+        addToast({
+          title: created.title,
+          description: 'Новый столбец добавлен на доску',
+          type: 'success',
+        });
+      }
+      setEditingColumn(null);
+    } catch (err: any) {
+      addToast({
+        title: 'Ошибка работы со столбцом',
+        description: err?.message || 'Проверьте наличие эндпоинтов столбцов на бекэнде',
+        type: 'error',
+      });
+      throw err;
+    }
+  };
+
+  // Удаление кастомного столбца (с выбором удаления карточек)
+  const handleConfirmDeleteColumn = async (deleteTasks: boolean) => {
+    if (!selectedCourseId || !deletingColumnInfo || !isTeacher) return;
+    const { column } = deletingColumnInfo;
+    try {
+      await deleteCourseColumn(selectedCourseId, column.id, deleteTasks);
+      setCustomColumns((prev) => prev.filter((c) => c.id !== column.id));
+      setTasks((prev) =>
+        deleteTasks
+          ? prev.filter((t) => t.column_id !== column.id)
+          : prev.map((t) => (t.column_id === column.id ? { ...t, column_id: null } : t))
+      );
+      addToast({
+        title: column.title,
+        description: deleteTasks
+          ? 'Столбец и его карточки удалены'
+          : 'Столбец удалён, карточки возвращены в стандартные колонки',
+        type: 'info',
+      });
+    } catch (err: any) {
+      addToast({
+        title: 'Не удалось удалить столбец',
+        description: err?.message || 'Ошибка сервера',
+        type: 'error',
+      });
+      throw err;
+    }
+  };
+
   const handleToggleBookmark = useCallback((task: StudentTask) => {
     const taskId = task.id;
     const assignmentId = task.assignment_id;
@@ -658,6 +742,7 @@ export default function Home() {
         <main className="flex-1 flex flex-col overflow-hidden relative rounded-2xl">
           <KanbanBoard
             tasks={filteredTasks}
+            customColumns={customColumns}
             onTasksChange={handleTasksChange}
             onCardClick={handleCardClick}
             onTagClick={(tag) => setSelectedTag(tag === selectedTag ? null : tag)}
@@ -665,6 +750,17 @@ export default function Home() {
             currentUser={currentUser}
             courseTitle={selectedCourse?.title || ''}
             onOpenCreateAssignment={() => setIsCreateAssignmentOpen(true)}
+            onOpenCreateColumn={() => {
+              setEditingColumn(null);
+              setIsColumnFormOpen(true);
+            }}
+            onEditColumn={(col) => {
+              setEditingColumn(col);
+              setIsColumnFormOpen(true);
+            }}
+            onDeleteColumn={(col, taskCount) => {
+              setDeletingColumnInfo({ column: col, taskCount });
+            }}
             transform={transform}
             setTransform={setTransform}
             isPanning={isPanning}
@@ -731,6 +827,26 @@ export default function Home() {
           }}
         />
       )}
+
+      {/* Модальное окно создания/редактирования кастомного столбца */}
+      <ColumnFormModal
+        isOpen={isColumnFormOpen}
+        editingColumn={editingColumn}
+        onClose={() => {
+          setIsColumnFormOpen(false);
+          setEditingColumn(null);
+        }}
+        onSubmit={handleSaveColumn}
+      />
+
+      {/* Модальное окно подтверждения удаления столбца */}
+      <DeleteColumnModal
+        isOpen={!!deletingColumnInfo}
+        column={deletingColumnInfo?.column || null}
+        taskCount={deletingColumnInfo?.taskCount || 0}
+        onClose={() => setDeletingColumnInfo(null)}
+        onConfirm={handleConfirmDeleteColumn}
+      />
 
       {/* Всплывающие системные уведомления (Toasts) */}
       <ToastContainer toasts={toasts} onDismiss={removeToast} />

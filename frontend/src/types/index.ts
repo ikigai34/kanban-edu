@@ -56,10 +56,20 @@ export interface SubmissionFile {
   uploaded_at: string;
 }
 
+export interface CourseColumn {
+  id: string;
+  course_id: string;
+  title: string;
+  order: number;
+  color?: string | null;
+  created_at: string;
+}
+
 export interface StudentTask {
   id: string;
   student_id: string;
   assignment_id: string;
+  column_id?: string | null;
   status: TaskStatus;
   position: number;
   comment?: string | null;
@@ -83,7 +93,7 @@ export interface StudentTask {
 }
 
 export interface ColumnDefinition {
-  id: TaskStatus;
+  id: string;
   title: string;
   accentColor: string;
   headerBg: string;
@@ -91,6 +101,8 @@ export interface ColumnDefinition {
   badgeBg: string;
   badgeText: string;
   dotColor: string;
+  isCustom?: boolean;
+  courseColumn?: CourseColumn;
 }
 
 export interface CanvasTransform {

@@ -3,9 +3,9 @@
 import React from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { StudentTask, ColumnDefinition, User } from '@/types';
+import { StudentTask, ColumnDefinition, CourseColumn, User } from '@/types';
 import { KanbanCard } from './KanbanCard';
-import { Plus, Inbox, CheckCircle2 } from 'lucide-react';
+import { Plus, Inbox, CheckCircle2, Pencil, Trash2 } from 'lucide-react';
 
 interface KanbanColumnProps {
   column: ColumnDefinition;
@@ -15,6 +15,8 @@ interface KanbanColumnProps {
   onToggleBookmark?: (task: StudentTask) => void;
   currentUser: User | null;
   onAddAssignment?: () => void;
+  onEditColumn?: (column: CourseColumn) => void;
+  onDeleteColumn?: (column: CourseColumn, taskCount: number) => void;
 }
 
 export const KanbanColumn: React.FC<KanbanColumnProps> = ({
@@ -25,6 +27,8 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
   onToggleBookmark,
   currentUser,
   onAddAssignment,
+  onEditColumn,
+  onDeleteColumn,
 }) => {
   const { setNodeRef, isOver } = useDroppable({
     id: column.id,
@@ -54,12 +58,37 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
           </h3>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
           <span
             className={`px-2.5 py-0.5 rounded-full text-xs ${column.badgeBg}`}
           >
             {tasks.length}
           </span>
+
+          {isTeacher && column.isCustom && column.courseColumn && (
+            <>
+              {onEditColumn && (
+                <button
+                  type="button"
+                  onClick={() => onEditColumn(column.courseColumn!)}
+                  title="Редактировать столбец"
+                  className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-neutral-200 hover:bg-black/5 dark:hover:bg-white/10 rounded-md transition-colors"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
+              )}
+              {onDeleteColumn && (
+                <button
+                  type="button"
+                  onClick={() => onDeleteColumn(column.courseColumn!, tasks.length)}
+                  title="Удалить столбец"
+                  className="p-1 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/15 rounded-md transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </>
+          )}
 
           {isTeacher && onAddAssignment && (
             <button

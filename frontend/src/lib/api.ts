@@ -1,4 +1,4 @@
-import { User, Course, Assignment, StudentTask, TaskStatus, UserRole } from '@/types';
+import { User, Course, CourseColumn, Assignment, StudentTask, TaskStatus, UserRole } from '@/types';
 import { getCoursePrefs, saveCoursePrefs } from './storage';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
@@ -54,6 +54,10 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
       errorDetail = await response.text();
     }
     throw new Error(errorDetail || `HTTP error ${response.status}`);
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
   }
 
   return response.json();
@@ -249,10 +253,19 @@ export async function getCourseTasksForTeacher(courseId: string): Promise<Studen
   return tasks;
 }
 
-export async function moveTask(taskId: string, status: TaskStatus, position: number): Promise<StudentTask> {
+export async function moveTask(
+  taskId: string,
+  status: TaskStatus,
+  position: number,
+  columnId?: string | null
+): Promise<StudentTask> {
   const res = await request<StudentTask>(`/tasks/${taskId}/move`, {
     method: 'PATCH',
-    body: JSON.stringify({ status, position }),
+    body: JSON.stringify({
+      status,
+      position,
+      column_id: columnId ?? null,
+    }),
   });
   return res;
 }
@@ -312,4 +325,47 @@ export async function getGroupStudents(groupId: string): Promise<User[]> {
 
 export async function getAllGroups(): Promise<{ id: string; name: string }[]> {
   return request<{ id: string; name: string }[]>('/groups/');
+}
+
+// 6. Кастомные столбцы дисциплины (Course Columns)
+export async function getCourseColumns(courseId: string): Promise<CourseColumn[]> {
+  return request<CourseColumn[]>(`/courses/${courseId}/columns`);
+}
+
+export async function createCourseColumn(
+  courseId: string,
+  data: { title: string; order?: number | null; color?: string | null }
+): Promise<CourseColumn> {
+  return request<CourseColumn>(`/courses/${courseId}/columns`, {
+    method: 'POST',
+    body: JSON.stringify({
+      title: data.title,
+      order: data.order ?? null,
+      color: data.color || 'indigo',
+    }),
+  });
+}
+
+export async function updateCourseColumn(
+  courseId: string,
+  columnId: string,
+  data: { title?: string; order?: number; color?: string | null }
+): Promise<CourseColumn> {
+  return request<CourseColumn>(`/courses/${courseId}/columns/${columnId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteCourseColumn(
+  courseId: string,
+  columnId: string,
+  deleteTasks: boolean = false
+): Promise<void> {
+  return request<void>(
+    `/courses/${courseId}/columns/${columnId}?delete_tasks=${deleteTasks}`,
+    {
+      method: 'DELETE',
+    }
+  );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
   DndContext,
@@ -17,13 +17,13 @@ import {
   DropAnimation,
 } from '@dnd-kit/core';
 import { arrayMove, sortableKeyboardCoordinates } from '@dnd-kit/sortable';
-import { StudentTask, TaskStatus, User, CanvasTransform } from '@/types';
-import { INITIAL_COLUMNS } from '@/lib/mockData';
+import { StudentTask, TaskStatus, CourseColumn, User, CanvasTransform } from '@/types';
+import { INITIAL_COLUMNS, buildCustomColumnDefinition } from '@/lib/mockData';
 import { KanbanColumn } from './KanbanColumn';
 import { KanbanCard } from './KanbanCard';
 import { moveTask } from '@/lib/api';
 import { extractHashtags } from '@/lib/tagUtils';
-import { Hand, MousePointer } from 'lucide-react';
+import { Hand, MousePointer, Plus } from 'lucide-react';
 
 export const isTaskInfo = (t: StudentTask): boolean => {
   if (t.status === 'info') return true;
@@ -37,6 +37,7 @@ export const isTaskInfo = (t: StudentTask): boolean => {
 
 interface KanbanBoardProps {
   tasks: StudentTask[];
+  customColumns?: CourseColumn[];
   onTasksChange: (tasks: StudentTask[]) => void;
   onCardClick: (task: StudentTask) => void;
   onTagClick?: (tag: string) => void;
@@ -44,6 +45,9 @@ interface KanbanBoardProps {
   currentUser: User | null;
   courseTitle: string;
   onOpenCreateAssignment: () => void;
+  onOpenCreateColumn?: () => void;
+  onEditColumn?: (column: CourseColumn) => void;
+  onDeleteColumn?: (column: CourseColumn, taskCount: number) => void;
   transform: CanvasTransform;
   setTransform: React.Dispatch<React.SetStateAction<CanvasTransform>>;
   isPanning: boolean;
@@ -53,7 +57,7 @@ interface KanbanBoardProps {
   onMouseDown: (e: React.MouseEvent) => void;
   onMouseMove: (e: React.MouseEvent) => void;
   onMouseUp: () => void;
-  onCardMoved?: (task: StudentTask, oldStatus: TaskStatus, newStatus: TaskStatus) => void;
+  onCardMoved?: (task: StudentTask, oldContainer: string, newContainer: string) => void;
 }
 
 const dropAnimationConfig: DropAnimation = {
@@ -79,6 +83,7 @@ const COLUMN_ORDER: TaskStatus[] = [
 
 export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   tasks,
+  customColumns = [],
   onTasksChange,
   onCardClick,
   onTagClick,
@@ -86,6 +91,9 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   currentUser,
   courseTitle,
   onOpenCreateAssignment,
+  onOpenCreateColumn,
+  onEditColumn,
+  onDeleteColumn,
   transform,
   setTransform,
   isPanning,
@@ -100,7 +108,24 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(false);
   const [activeTask, setActiveTask] = useState<StudentTask | null>(null);
-  const [dragStartStatus, setDragStartStatus] = useState<TaskStatus | null>(null);
+  const [dragStartContainer, setDragStartContainer] = useState<string | null>(null);
+
+  const sortedCustomColumns = useMemo(
+    () => [...customColumns].sort((a, b) => a.order - b.order),
+    [customColumns]
+  );
+
+  const customColumnIds = useMemo(
+    () => new Set(customColumns.map((c) => c.id)),
+    [customColumns]
+  );
+
+  const getTaskContainer = (t: StudentTask): string => {
+    if (t.column_id && customColumnIds.has(t.column_id)) {
+      return t.column_id;
+    }
+    return isTaskInfo(t) ? 'info' : t.status;
+  };
 
   useEffect(() => {
     setMounted(true);
@@ -181,16 +206,16 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   }, [setTransform]);
 
   /**
-   * Находит колонку, которой принадлежит ID (будь то колонка или карточка внутри нее)
+   * Находит колонку, которой принадлежит ID (системная, кастомная или карточка внутри нее)
    */
-  const findContainer = (id: string | null | undefined): TaskStatus | null => {
+  const findContainer = (id: string | null | undefined): string | null => {
     if (!id) return null;
-    if (COLUMN_ORDER.includes(id as TaskStatus)) {
-      return id as TaskStatus;
+    if (COLUMN_ORDER.includes(id as TaskStatus) || customColumnIds.has(id)) {
+      return id;
     }
     const task = tasks.find((t) => t.id === id);
     if (!task) return null;
-    return isTaskInfo(task) ? 'info' : task.status;
+    return getTaskContainer(task);
   };
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -198,7 +223,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
     const task = tasks.find((t) => t.id === active.id);
     if (task) {
       setActiveTask(task);
-      setDragStartStatus(isTaskInfo(task) ? 'info' : task.status);
+      setDragStartContainer(getTaskContainer(task));
     }
   };
 
@@ -250,10 +275,11 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
 
     // Карточки целевой колонки (без перемещаемой)
     const targetColumnCards = tasks
-      .filter((t) => t.status === overContainer && t.id !== activeId)
+      .filter((t) => getTaskContainer(t) === overContainer && t.id !== activeId)
       .sort((a, b) => a.position - b.position);
 
-    const isOverAColumn = COLUMN_ORDER.includes(overId as TaskStatus);
+    const isOverAColumn =
+      COLUMN_ORDER.includes(overId as TaskStatus) || customColumnIds.has(overId);
     const overItem = tasks.find((t) => t.id === overId);
 
     let insertIndex = targetColumnCards.length;
@@ -272,7 +298,10 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
 
     // Собираем обновленную целевую колонку
     const newTargetCards = [...targetColumnCards];
-    const updatedActiveItem = { ...activeItem, status: overContainer };
+    const isTargetCustom = customColumnIds.has(overContainer);
+    const updatedActiveItem: StudentTask = isTargetCustom
+      ? { ...activeItem, column_id: overContainer }
+      : { ...activeItem, status: overContainer as TaskStatus, column_id: null };
     newTargetCards.splice(insertIndex, 0, updatedActiveItem);
 
     // Присваиваем последовательные позиции 1, 2, 3...
@@ -283,7 +312,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
 
     // Оставшиеся задачи из других колонок
     const otherTasks = tasks.filter(
-      (t) => t.id !== activeId && t.status !== overContainer
+      (t) => t.id !== activeId && getTaskContainer(t) !== overContainer
     );
 
     onTasksChange([...otherTasks, ...targetCardsWithPositions]);
@@ -294,9 +323,9 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
    */
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
-    const initialStatus = dragStartStatus;
+    const initialContainer = dragStartContainer;
     setActiveTask(null);
-    setDragStartStatus(null);
+    setDragStartContainer(null);
 
     if (!over) return;
 
@@ -331,12 +360,11 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
       }
     }
 
-    // 1. ПЕРЕМЕЩЕНИЕ ВНУТРИ ОДНОЙ И ТОЙ ЖЕ КОЛОНКИ (включая 'info')
+    // 1. ПЕРЕМЕЩЕНИЕ ВНУТРИ ОДНОЙ И ТОЙ ЖЕ КОЛОНКИ (включая 'info' и кастомные)
     if (activeContainer === overContainer) {
       if (activeId !== overId) {
-        const isInfoCol = activeContainer === 'info';
         const columnCards = tasks
-          .filter((t) => isInfoCol ? isTaskInfo(t) : (t.status === activeContainer && !isTaskInfo(t)))
+          .filter((t) => getTaskContainer(t) === activeContainer)
           .sort((a, b) => a.position - b.position);
 
         const oldIndex = columnCards.findIndex((t) => t.id === activeId);
@@ -351,15 +379,14 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
             position: idx + 1,
           }));
 
-          const otherTasks = tasks.filter((t) =>
-            isInfoCol ? !isTaskInfo(t) : (t.status !== activeContainer || isTaskInfo(t))
-          );
+          const otherTasks = tasks.filter((t) => getTaskContainer(t) !== activeContainer);
           const finalTasks = [...otherTasks, ...updatedColumnCards];
 
           onTasksChange(finalTasks);
 
+          const finalColId = customColumnIds.has(activeContainer) ? activeContainer : null;
           try {
-            await moveTask(activeId, activeItem.status, newIndex + 1);
+            await moveTask(activeId, activeItem.status, newIndex + 1, finalColId);
           } catch (err) {
             console.error('Ошибка сохранения позиции внутри колонки:', err);
           }
@@ -370,20 +397,21 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
     }
 
     // 2. ФИКСАЦИЯ ИТОГОВОЙ ПОЗИЦИИ ПРИ СМЕНЕ КОЛОНКИ
-    const currentStatus = activeItem.status;
+    const currentContainer = getTaskContainer(activeItem);
     const columnTasks = tasks
-      .filter((t) => t.status === currentStatus)
+      .filter((t) => getTaskContainer(t) === currentContainer)
       .sort((a, b) => a.position - b.position);
 
     const finalIndex = columnTasks.findIndex((t) => t.id === activeId);
     const finalPosition = finalIndex !== -1 ? finalIndex + 1 : 1;
 
-    if (initialStatus && currentStatus !== initialStatus && onCardMoved) {
-      onCardMoved(activeItem, initialStatus, currentStatus);
+    if (initialContainer && currentContainer !== initialContainer && onCardMoved) {
+      onCardMoved(activeItem, initialContainer, currentContainer);
     }
 
+    const finalColId = customColumnIds.has(currentContainer) ? currentContainer : null;
     try {
-      await moveTask(activeId, currentStatus, finalPosition);
+      await moveTask(activeId, activeItem.status, finalPosition, finalColId);
     } catch (err) {
       console.error('Ошибка сохранения позиции задачи:', err);
     }
@@ -435,9 +463,9 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
         >
           {visibleColumns.map((colId) => {
             const col = INITIAL_COLUMNS.find((c) => c.id === colId)!;
-            const columnTasks = colId === 'info'
-              ? tasks.filter((t) => isTaskInfo(t)).sort((a, b) => a.position - b.position)
-              : tasks.filter((t) => t.status === colId && !isTaskInfo(t)).sort((a, b) => a.position - b.position);
+            const columnTasks = tasks
+              .filter((t) => getTaskContainer(t) === colId)
+              .sort((a, b) => a.position - b.position);
 
             return (
               <KanbanColumn
@@ -452,6 +480,41 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
               />
             );
           })}
+
+          {/* Кастомные столбцы дисциплины */}
+          {sortedCustomColumns.map((customCol) => {
+            const colDef = buildCustomColumnDefinition(customCol);
+            const columnTasks = tasks
+              .filter((t) => getTaskContainer(t) === customCol.id)
+              .sort((a, b) => a.position - b.position);
+
+            return (
+              <KanbanColumn
+                key={customCol.id}
+                column={colDef}
+                tasks={columnTasks}
+                onCardClick={onCardClick}
+                onTagClick={onTagClick}
+                onToggleBookmark={onToggleBookmark}
+                currentUser={currentUser}
+                onAddAssignment={onOpenCreateAssignment}
+                onEditColumn={onEditColumn}
+                onDeleteColumn={onDeleteColumn}
+              />
+            );
+          })}
+
+          {/* Кнопка создания своего столбца для преподавателя */}
+          {isTeacher && onOpenCreateColumn && (
+            <button
+              type="button"
+              onClick={onOpenCreateColumn}
+              className="w-[260px] shrink-0 h-14 flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300/80 dark:border-[#2a2a2a] hover:border-blue-400 dark:hover:border-[#444444] bg-white/50 dark:bg-[#161616]/60 hover:bg-white/90 dark:hover:bg-[#1e1e1e] text-xs font-semibold text-slate-600 dark:text-neutral-400 hover:text-blue-600 dark:hover:text-neutral-200 transition-all cursor-pointer select-none"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Добавить столбец</span>
+            </button>
+          )}
         </div>
 
         {/* Панель подсказки и режима перетаскивания */}
