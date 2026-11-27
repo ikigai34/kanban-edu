@@ -4,6 +4,7 @@ import  uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete
+from werkzeug.wsgi import responder
 
 from app.core.database import get_db
 from app.models import CourseColumn
@@ -13,6 +14,7 @@ from app.models.user import User, UserRole
 from app.models.student_task import StudentTask
 from app.schemas.course import CourseCreate, CourseUpdate, CourseResponse, CourseAssignGroup
 from app.schemas.study_group import StudyGroupResponse
+from app.schemas.course_column import CourseColumnCreate, CourseColumnUpdate, CourseColumnResponse
 from app.api.deps import get_current_user
 
 router = APIRouter(prefix="/courses", tags=["Дисциплины"])
@@ -181,6 +183,93 @@ async def delete_course(
     await db.commit()
     return None
 
+# получение кастомных столбцов
+@router.get("/{course_id}/columns", response_model=list[CourseColumnResponse])
+async def get_course_columns(
+        course_id: uuid.UUID,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+):
+    course = await(db.get(Course, course_id))
+    if not course:
+        raise HTTPException(status_code=404)
+
+    query = (
+        select(CourseColumn)
+        .where(CourseColumn.course_id == course_id)
+        .order_by(CourseColumn.order, CourseColumn.created_at)
+    )
+
+    result = await db.execute(query)
+    return result.scalars().all()
+
+# создание столбца
+@router.post("/{course_id}/columns", response_model=CourseColumnResponse, status_code=status.HTTP_201_CREATED)
+async def create_course_column(
+        course_id: uuid.UUID,
+        col_in: CourseColumnCreate,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+):
+    course = await db.get(Course, course_id)
+    if not course:
+        raise HTTPException(status_code=404)
+
+    if current_user.role != UserRole.ADMIN and course.teacher_id != current_user.id:
+        raise HTTPException(status_code=403)
+
+    if col_in.order is None:
+        count_query = (
+            select(func.count())
+            .select_from(CourseColumn)
+            .where(CourseColumn.course_id == course_id)
+        )
+        count_res = await db.execute(count_query)
+        order_val = count_res.scalar_one() or 0
+    else:
+        order_val = col_in.order
+
+    column = CourseColumn(
+        course_id=course_id,
+        title=col_in.title,
+        description=col_in.description,
+        order=order_val,
+        color=col_in.color,
+    )
+    db.add(column)
+    await db.commit()
+    await db.refresh(column)
+    return column
+
+# редактирование столбца
+@router.patch("/{course_id}/columns/{col_id}", response_model=CourseColumnResponse)
+async def update_course_column(
+        course_id: uuid.UUID,
+        column_id: uuid.UUID,
+        col_in: CourseColumnUpdate,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+):
+    course = await db.get(Course, course_id)
+    if not course:
+        raise HTTPException(status_code=404)
+
+    if current_user.role != UserRole.ADMIN and course.teacher_id != current_user.id:
+        raise HTTPException(status_code=403)
+
+    column = await db.get(CourseColumn, column_id)
+    if not column:
+        raise HTTPException(status_code=404)
+
+    update_data = col_in.model_dump(exclude_unset=True)
+    for Field, value in update_data.items():
+        setattr(column, Field, value)
+
+    await db.commit()
+    await db.refresh(column)
+    return column
+
+
 # удаление столбца
 @router.delete("/{course_id}/columns/{column_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_course_column(
@@ -227,5 +316,3 @@ async def delete_course_column(
             pass
 
     return None
-
-@router.get("/{course_id}/columns")
