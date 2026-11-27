@@ -4,7 +4,6 @@ import  uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete
-from werkzeug.wsgi import responder
 
 from app.core.database import get_db
 from app.models import CourseColumn
@@ -232,7 +231,6 @@ async def create_course_column(
     column = CourseColumn(
         course_id=course_id,
         title=col_in.title,
-        description=col_in.description,
         order=order_val,
         color=col_in.color,
     )
@@ -242,7 +240,7 @@ async def create_course_column(
     return column
 
 # редактирование столбца
-@router.patch("/{course_id}/columns/{col_id}", response_model=CourseColumnResponse)
+@router.patch("/{course_id}/columns/{column_id}", response_model=CourseColumnResponse)
 async def update_course_column(
         course_id: uuid.UUID,
         column_id: uuid.UUID,
@@ -258,7 +256,7 @@ async def update_course_column(
         raise HTTPException(status_code=403)
 
     column = await db.get(CourseColumn, column_id)
-    if not column:
+    if not column or column.course_id != course_id:
         raise HTTPException(status_code=404)
 
     update_data = col_in.model_dump(exclude_unset=True)

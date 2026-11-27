@@ -5,13 +5,13 @@ from typing import List
 from fastapi import APIRouter, HTTPException, status, UploadFile, File, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-
 from app.core.database import get_db
 from app.api.deps import get_current_user
 from app.models.user import User, UserRole
 from app.models.student_task import StudentTask, TaskStatus
 from app.models.assignment import Assignment
 from app.models.course import Course
+from app.models.course_column import CourseColumn
 from app.schemas.student_task import (
     StudentTaskResponse,
     StudentTaskMove,
@@ -82,7 +82,14 @@ async def move_task(
         raise HTTPException(status_code=403, detail="нельзя перемещать чужую задачу")
 
     # обновление статуса и позиции
+    if move_data.column_id is not None:
+        assignment = await db.get(Assignment, task.assignment_id)
+        column = await db.get(CourseColumn, move_data.column_id)
+        if not column or not assignment or column.course_id != assignment.course_id:
+            raise HTTPException(status_code=404)
+
     task.status = move_data.status
+    task.column_id = move_data.column_id
     task.position = move_data.position
 
     await db.commit()
